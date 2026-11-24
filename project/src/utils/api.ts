@@ -4,7 +4,9 @@ import { computeMLAnalysis, computeOEE } from '@/utils/calculations';
 // A production frontend can use its hosted API URL; local Vite keeps using its dev proxy.
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, '');
 const API_BASE_URL = configuredApiBaseUrl || (typeof window !== 'undefined'
-  ? (window.location.port === '5173' ? window.location.origin : `${window.location.protocol}//${window.location.hostname}:8001`)
+  ? (window.location.port === '5173' || window.location.port === '' || window.location.port === '443' || window.location.port === '80'
+    ? window.location.origin
+    : `${window.location.protocol}//${window.location.hostname}:8001`)
   : 'http://localhost:8001');
 
 function getAuthHeaders(): Record<string, string> {

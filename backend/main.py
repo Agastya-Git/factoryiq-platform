@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Depends, HTTPException, Query, Header, Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, text
@@ -2297,6 +2298,27 @@ def mark_notice_read(notice_id: str, db: Session = Depends(get_db)):
     notice.read = True
     db.commit()
     return {"ok": True}
+
+# In production, serve the built React app from this same origin as the API.
+# This avoids a second public service URL and cross-origin login/API requests.
+_frontend_dist = Path(parent_dir) / "project" / "dist"
+
+@app.get("/{frontend_path:path}", include_in_schema=False)
+def serve_frontend(frontend_path: str):
+    if frontend_path == "api" or frontend_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    index_file = _frontend_dist / "index.html"
+    if not index_file.is_file():
+        raise HTTPException(status_code=404, detail="Frontend build is unavailable")
+
+    requested_file = (_frontend_dist / frontend_path).resolve()
+    try:
+        requested_file.relative_to(_frontend_dist.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    if frontend_path and requested_file.is_file():
+        return FileResponse(requested_file)
+    return FileResponse(index_file)
 
 # ---------- Startup Hook ----------
 

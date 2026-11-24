@@ -1,75 +1,48 @@
-# FactoryIQ deployment and data migration
+# FactoryIQ production deployment
 
-This deployment keeps the existing React UI and FastAPI behavior, and moves the
-current SQLite database into persistent PostgreSQL. Do not start the hosted API
-against an empty database before the import: the API seeds a baseline dataset
-when it sees an empty user table.
+FactoryIQ deploys as one always-on Render web service that serves both the
+React site and FastAPI API from the same HTTPS origin. PostgreSQL is a separate
+managed resource so application data survives deploys and restarts. The API is
+kept to one instance and one worker because the five-second telemetry
+simulator runs inside the API process.
 
-## What gets migrated
+The Render Blueprint is `render.yaml`. It expects an existing Render Postgres
+resource named `factoryiq-production`; this ordering is deliberate so the API
+cannot start against an empty database and seed over the imported system.
 
-The active local database is `factoryiq.db`. The migration script copies every
-application table (machines, all telemetry history, work orders and timelines,
-notices and read states, users and password hashes, inventory and stock levels,
-and stations) and prints the source/destination row counts for verification.
-Telemetry continues to grow while the local simulator is running, so the report
-from the frozen database is the authoritative snapshot.
+## What is retained
 
-The script opens SQLite read-only,
-refuses a non-PostgreSQL target, refuses a target containing application rows,
-and does not call the API startup seeding or telemetry hooks.
+The one-time SQLite-to-PostgreSQL migration copies all application tables,
+including machines, telemetry history, work orders and timelines, notices,
+users and password hashes, inventory, and stations. Keep the local database
+and a separate backup until cloud counts and behavior have been checked.
+Never commit `factoryiq.db`, backups, `.env`, or credential files.
 
-## 1. Freeze and back up local data
+## Deployment sequence
 
-1. Close the backend terminal with **Ctrl+C** so telemetry and other writes stop.
-2. In the project folder, make a separate backup outside the folder that will be
-   pushed as source code. Keep the original `factoryiq.db` unchanged.
-3. Do not include `factoryiq.db`, `.env`, or any backup in a source repository.
-   The root `.gitignore` excludes these files and the local plaintext credential
-   directory.
+### 1. Create the persistent database
 
-## 2. Create a private source repository
+In Render, create a PostgreSQL database named exactly `factoryiq-production`,
+in the **Singapore** region. Choose a paid plan (the 0.5 CPU / 1 GB plan is a
+reasonable starting point for this data size) and review the current monthly
+price shown by Render before creating it. Wait until its status is Available.
 
-This workspace is not currently a Git repository. Create a **private** GitHub
-repository, then from Command Prompt in the project root:
+For the one-time import, copy its **external** connection URL. Keep that URL
+private. If Render requires an IP allowlist for external connections, allow
+your current IP only, then remove that temporary rule after import. The
+deployed service will use the private internal URL automatically through
+`render.yaml`.
 
-```cmd
-git init
-git add -A
-git status --short
-```
+### 2. Freeze and back up the local database
 
-Before committing, make sure the staged list does not include `.env`,
-`factoryiq.db`, any database backup, or `ADMIN_SUPERVISOR_CREDENTIALS.md`. Then
-commit and connect the private repository:
+Stop the local backend with **Ctrl+C** so telemetry stops writing. Make a
+separate copy of `factoryiq.db` outside the repository. Keep the original and
+backup unchanged.
 
-```cmd
-git commit -m "Prepare FactoryIQ deployment"
-git branch -M main
-git remote add origin https://github.com/YOUR_ACCOUNT/YOUR_PRIVATE_REPO.git
-git push -u origin main
-```
+### 3. Import the local data
 
-Replace the repository URL with the one GitHub gives you. Connect Render to this
-private repository so it can build the frontend and backend.
-
-## 3. Create persistent PostgreSQL
-
-Create a paid Render Postgres database. Use the database's external connection
-URL only for the one-time import from your computer; use its internal connection
-URL for the deployed backend. Keep both URLs private.
-
-## 4. Import the existing database before deploying the API
-
-From Command Prompt, in the project root, run:
-
-```cmd
-cd /d "C:\Users\Agasthya Shetty\Downloads\factoryiq-with-roles"
-powershell -NoProfile
-```
-
-In the PowerShell window, enter the external PostgreSQL URL securely and run the
-copy. `Read-Host -AsSecureString` masks the URL as you type. The value is held
-only in that PowerShell session and removed after the script exits.
+Open PowerShell in the repository folder and run the following. PowerShell
+prompts you for the external database URL without echoing it:
 
 ```powershell
 $secureUrl = Read-Host "Paste the external PostgreSQL URL" -AsSecureString
@@ -79,58 +52,47 @@ Remove-Item Env:DATABASE_URL
 $secureUrl.Dispose()
 ```
 
-Continue only if the script prints **Migration completed** and all counts. If it
-stops with an error, do not start the API; keep the local database and backup as
-they are and resolve the reported schema/target issue first. The script will not
-overwrite a non-empty cloud database.
+Proceed only if the script reports **Migration completed** and prints matching
+source and destination counts for every table. It reads SQLite in read-only
+mode, requires an empty PostgreSQL destination, and refuses to overwrite
+existing application rows. If it fails, keep both local copies and do not
+deploy the web service yet.
 
-## 5. Deploy the backend as a single instance
+### 4. Create the Render service from the Blueprint
 
-Create a Render Web Service from the repository root with:
+Open Render's **New + → Blueprint** flow and select the private GitHub
+repository `Agastya-Git/factoryiq-platform`, branch `main`, and its root
+`render.yaml`. The Blueprint references the already-created database by name.
+Review the proposed service and the paid compute plan before applying it.
 
-- Build command: `pip install -r requirements.txt`
-- Start command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1`
-- Health check path: `/api/health`
-- `DATABASE_URL`: PostgreSQL **internal** connection URL
-- `APP_ENV`: `production` (disables silent SQLite fallback if PostgreSQL is unavailable)
-- `ALLOWED_ORIGINS`: the exact deployed frontend origin, such as
-  `https://your-factoryiq-site.onrender.com`
-- `ENABLE_API_DOCS`: `true` if you want `/docs` as on localhost
+The service builds the frontend and backend together, sets `APP_ENV=production`,
+connects to the managed database, and starts one Uvicorn worker. Do not add a
+second instance: each instance would create another telemetry simulator loop.
 
-Use one backend instance and one worker. The app starts its five-second
-simulated telemetry loop inside the API process; multiple processes would run
-multiple loops. Use an always-on service so the stream continues while the site
-is idle.
+### 5. Verify before cutover
 
-## 6. Deploy the frontend
+When Render reports the service as Live, open its `onrender.com` URL and check:
 
-Create a Render Static Site with the repository's `project` directory as its
-root:
+1. `/api/health` reports `online`, `postgresql`, and `database_connected: true`.
+2. The login page loads at the same origin and a known account signs in.
+3. Machine statuses, telemetry history, work-order assignments/history,
+   notices, inventory counts, and stations match the migration report.
+4. A new telemetry reading appears; then restart the service and confirm normal
+   writes still persist in PostgreSQL.
 
-- Build command: `npm ci && npm run build`
-- Publish directory: `dist`
-- Build environment variable `VITE_API_BASE_URL`: the backend's public HTTPS
-  origin, with no trailing slash
+Do not import over a non-empty database or test destructive changes on the
+production dataset. Retain the local SQLite backup until you have confirmed
+Render's backup/restore path.
 
-After Render assigns the static site's URL, set the backend's
-`ALLOWED_ORIGINS` to that exact origin (scheme and host, no path or trailing
-slash) and redeploy the backend. Until this is set, browser API calls from the
-hosted frontend can be blocked by CORS.
+## Deployment configuration
 
-The frontend build uses the same React application. The API URL setting only
-changes where its requests go; local Vite still uses the existing proxy and
-localhost defaults.
+- Region: Singapore for the web service and database.
+- Web plan: 1 CPU / 2 GB RAM to accommodate the ML stack and live API.
+- Database: paid persistent PostgreSQL; 0.5 CPU / 1 GB is a reasonable start.
+- Health check: `/api/health`.
+- One web instance and one worker; telemetry ticks every five seconds.
+- Frontend requests use same-origin `/api/...` URLs, so no hosted CORS URL or
+  separate frontend service configuration is required.
 
-## 7. Verify the cloud copy before cutover
-
-Check the migration counts against the output from the script. Then verify the
-hosted `/api/health`, sign in with a real account, and inspect machine statuses,
-recent telemetry, work-order assignments and history, notices, and inventory.
-Make one reversible test change in a non-production copy first if you need to
-confirm writes. After cutover, confirm a new telemetry row and an ordinary data
-change remain after a service restart. Keep the original SQLite backup until a
-restore from the hosted database backup has been verified.
-
-Do not run the app against a new empty cloud database and expect it to restore
-the live data automatically; the explicit migration in step 3 is what carries
-that data over.
+Current Render plans and prices can change; confirm the recurring charge in
+Render before applying the Blueprint.
