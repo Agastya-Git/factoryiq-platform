@@ -40,7 +40,7 @@ ADMIN_SUPERVISOR_CREDENTIALS.md
 # ── Node / Frontend ───────────────────────────────────────────────
 node_modules/
 project/node_modules/
-project/dist/
+# project/dist/
 project/dist-ssr/
 
 # ── Logs ──────────────────────────────────────────────────────────
@@ -61,3 +61,5 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+!project/dist/
