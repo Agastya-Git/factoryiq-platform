@@ -3,7 +3,7 @@ services:
     name: factoryiq-platform
     runtime: python
     region: singapore
-    plan: 1c-2g
+    plan: standard
     buildCommand: pip install -r requirements.txt && npm ci --prefix project && npm run build --prefix project
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /api/health
@@ -13,7 +13,3 @@ services:
         value: production
       - key: ENABLE_API_DOCS
         value: "true"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: factoryiq-production
-          property: connectionString

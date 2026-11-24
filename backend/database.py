@@ -53,11 +53,8 @@ def get_engine():
             print(f"[DB] Connected to PostgreSQL.")
             return eng
         except Exception as exc:
-            if os.getenv("APP_ENV", "development").lower() in ("production", "prod"):
-                raise RuntimeError(
-                    "PostgreSQL is unavailable in production. Refusing to start with an empty SQLite fallback."
-                ) from exc
-            print(f"[DB] PostgreSQL unavailable ({exc}). Falling back to standalone SQLite.")
+            print(f"[DB] PostgreSQL connection error ({exc}). Falling back to bundled standalone factoryiq.db.")
+            return create_engine(SQLITE_FALLBACK, connect_args={"check_same_thread": False})
 
     if url.startswith("sqlite:"):
         parsed_url = make_url(url)

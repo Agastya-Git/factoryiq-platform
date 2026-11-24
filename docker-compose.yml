@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  factoryiq:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: factoryiq-platform
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - APP_ENV=production
+      - ENABLE_API_DOCS=true
+    restart: unless-stopped

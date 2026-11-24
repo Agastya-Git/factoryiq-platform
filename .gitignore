@@ -23,10 +23,12 @@ dist/
 build/
 *.egg
 
-# ── SQLite fallback DB (do not commit data files) ────────────────
+# ── SQLite DB (factoryiq.db is retained for portable deployment) ──
 *.db
+!factoryiq.db
 *.db.*
 *.db-*
+.runtime-db/
 *.sqlite
 *.sqlite3
 *.bak
